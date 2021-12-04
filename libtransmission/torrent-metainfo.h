@@ -55,6 +55,8 @@ public:
 
     static bool convertAnnounceToScrape(std::string& setme, std::string_view announce_url);
 
+    virtual void clear();
+
 protected:
     struct tracker_t
     {
@@ -154,6 +156,10 @@ public:
     }
 
     tr_info* toInfo() const final;
+
+    void clear() final;
+
+    std::string benc() const;
 
 private:
     static char* parsePath(std::string_view root, tr_variant* path, std::string& buf);

@@ -774,17 +774,13 @@ static void torrentInit(tr_torrent* tor, tr_ctor const* ctor)
     /* maybe save our own copy of the metainfo */
     if (tr_ctorGetSave(ctor))
     {
-        tr_variant const* val = nullptr;
-        if (tr_ctorGetMetainfo(ctor, &val))
+        tr_error* error = nullptr;
+        char const* const filename = tor->info.torrent;
+        if (!tr_ctorSaveContents(ctor, filename, &error))
         {
-            char const* path = tor->info.torrent;
-            int const err = tr_variantToFile(val, TR_VARIANT_FMT_BENC, path);
-
-            if (err != 0)
-            {
-                tr_torrentSetLocalError(tor, "Unable to save torrent file: %s", tr_strerror(err));
-            }
+            tr_torrentSetLocalError(tor, "Unable to save torrent file \"%s\": %s (%d)", filename, error->message, error->code);
         }
+        tr_error_clear(&error);
     }
 
     tor->tiers = tr_announcerAddTorrent(tor, onTrackerResponse, nullptr);
@@ -813,27 +809,70 @@ static void torrentInit(tr_torrent* tor, tr_ctor const* ctor)
     }
 }
 
-tr_parse_result tr_torrentParse(tr_ctor const* ctor, tr_info* setmeInfo)
+static void metainfo_to_inf(tr_session* session, tr_info& inf, tr_torrent_metainfo const& metainfo)
 {
-    tr_variant const* metainfo = nullptr;
-    if (!tr_ctorGetMetainfo(ctor, &metainfo))
-    {
-        return TR_PARSE_ERR;
-    }
+    inf.comment = tr_strvDup(metainfo.comment());
+    inf.creator = tr_strvDup(metainfo.creator());
+    inf.dateCreated = metainfo.dateCreated();
+    inf.name = tr_strvDup(metainfo.name());
+    inf.originalName = tr_strvDup(metainfo.name());
+    inf.pieceCount = metainfo.pieceCount();
+    inf.pieceSize = metainfo.pieceSize();
+    inf.source = tr_strvDup(metainfo.source());
+    inf.totalSize = metainfo.totalSize();
+    inf.isPrivate = metainfo.isPrivate();
+    inf.isFolder = std::size(metainfo.files()) > 1;
+    // inf.torrent = tr_strvDup(metainfo.getTorrentFilename(session, FIXME
 
-    auto parsed = tr_metainfoParse(tr_ctorGetSession(ctor), metainfo, nullptr);
-    if (!parsed)
-    {
-        return TR_PARSE_ERR;
-    }
+    auto const& info_hash = metainfo.infoHash();
+    std::copy(std::begin(info_hash), std::end(info_hash), inf.hash);
+    auto const info_hash_str = metainfo.infoHashString();
+    std::fill_n(inf.hashString, sizeof(inf.hashString), '\0');
+    std::copy(std::begin(info_hash_str), std::end(info_hash_str), inf.hashString);
 
-    if (setmeInfo != nullptr)
+    // webseeds
+    inf.webseedCount = 0;
+    auto n = std::size(metainfo.webseeds());
+    inf.webseeds = tr_new(char*, n);
+    for (auto const& url : metainfo.webseeds())
     {
-        *setmeInfo = parsed->info;
-        parsed->info = {};
+        inf.webseeds[inf.webseedCount] = tr_strvDup(url);
+        ++inf.webseedCount;
     }
+    TR_ASSERT(n == inf.webseedCount);
 
-    return TR_PARSE_OK;
+    // files
+    n = std::size(metainfo.files());
+    inf.files = tr_new(struct tr_file, n);
+    auto offset = uint64_t{ 0 };
+    for (auto const& file : metainfo.files())
+    {
+        inf.files[inf.fileCount].name = tr_strvDup(file.path());
+        inf.files[inf.fileCount].length = file.length();
+        inf.files[inf.fileCount].priv.offset = offset;
+        inf.files[inf.fileCount].priv.mtime = 0;
+        inf.files[inf.fileCount].priv.is_renamed = false; // FIXME
+        ++inf.fileCount;
+    }
+    TR_ASSERT(n == inf.fileCount);
+
+    // trackers
+    int tier_num = 0;
+    n = metainfo.trackerCount();
+    inf.trackers = tr_new(struct tr_tracker_info, n);
+    for (auto const& tier : metainfo.tiers())
+    {
+        for (auto const& tracker : tier)
+        {
+            inf.trackers[inf.trackerCount].tier = tier_num;
+            inf.trackers[inf.trackerCount].announce = tr_strvDup(tracker.announce_url_str);
+            inf.trackers[inf.trackerCount].scrape = tr_strvDup(tracker.announce_url_str);
+            inf.trackers[inf.trackerCount].id = inf.trackerCount;
+            ++inf.trackerCount;
+        }
+        ++tier_num;
+    }
+    TR_ASSERT(n == inf.trackerCount);
 }
 
 tr_torrent* tr_torrentNew(tr_ctor const* ctor, int* setme_error, int* setme_duplicate_id)
@@ -842,7 +881,8 @@ tr_torrent* tr_torrentNew(tr_ctor const* ctor, int* setme_error, int* setme_dupl
     auto* const session = tr_ctorGetSession(ctor);
     TR_ASSERT(tr_isSession(session));
 
-    tr_variant const* metainfo = nullptr;
+    auto* const metainfo = tr_ctorGetMetainfo(ctor);
+
     tr_ctorGetMetainfo(ctor, &metainfo);
     auto parsed = tr_metainfoParse(session, metainfo, nullptr);
     if (!parsed)

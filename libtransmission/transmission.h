@@ -812,30 +812,16 @@ char const* tr_blocklistGetURL(tr_session const*);
 
 /** @} */
 
-/** @addtogroup tr_ctor Torrent Constructors
-    @{
-
-    Instantiating a tr_torrent had gotten more complicated as features were
-    added. At one point there were four functions to check metainfo and five
-    to create a tr_torrent object.
-
-    To remedy this, a Torrent Constructor (struct tr_ctor) has been introduced:
-    - Simplifies the API to two functions: tr_torrentParse() and tr_torrentNew()
-    - You can set the fields you want; the system sets defaults for the rest.
-    - You can specify whether or not your fields should supercede resume's.
-    - We can add new features to tr_ctor without breaking tr_torrentNew()'s API.
-
-    All the tr_ctor{Get,Set}* () functions with a return value return
-    an error number, or zero if no error occurred.
-
-    You must call one of the SetMetainfo() functions before creating
-    a torrent with a tr_ctor. The other functions are optional.
-
-    You can reuse a single tr_ctor to create a batch of torrents --
-    just call one of the SetMetainfo() functions between each
-    tr_torrentNew() call.
-
-    Every call to tr_ctorSetMetainfo* () frees the previous metainfo.
+/**
+ * Instantiating tr_torrents and wrangling .torrent file metadata
+ *
+ * 1. Torrent metadata is handled in the tr_torrent_metadata class.
+ * You can load it from a file using tr_torrentMetadataParseTorrentFile().
+ *
+ * 2. Torrents should be instantiated using a torrent builder (tr_ctor).
+ * Pass it a metainfo directly or use one of the convenience functions.
+ * If desired, change the optional settings e.g. torrent priority.
+ * When ready, pass the builder object to tr_torrentNew().
  */
 
 enum tr_ctorMode
@@ -845,11 +831,9 @@ enum tr_ctorMode
 };
 
 /** @brief Create a torrent constructor object used to instantiate a tr_torrent
-    @param session_or_nullptr the tr_session.
-                              This is required if you're going to call tr_torrentNew(),
-                              but you can use nullptr for tr_torrentParse().
-    @see tr_torrentNew(), tr_torrentParse() */
-tr_ctor* tr_ctorNew(tr_session const* session_or_nullptr);
+    @param session the tr_session.
+    @see tr_torrentNew() */
+tr_ctor* tr_ctorNew(tr_session* session);
 
 /** @brief Free a torrent constructor object */
 void tr_ctorFree(tr_ctor* ctor);
@@ -862,7 +846,9 @@ void tr_ctorSetDeleteSource(tr_ctor* ctor, bool doDelete);
 int tr_ctorSetMetainfoFromMagnetLink(tr_ctor* ctor, char const* magnet);
 
 /** @brief Set the constructor's metainfo from a raw benc already in memory */
-int tr_ctorSetMetainfo(tr_ctor* ctor, void const* metainfo, size_t len);
+int tr_ctorSetMetainfo(tr_ctor* ctor, char const* metainfo, size_t len);
+
+struct tr_torrent_metainfo const* tr_ctorGetMetainfo(tr_ctor const* ctor);
 
 /** @brief Set the constructor's metainfo from a local .torrent file */
 int tr_ctorSetMetainfoFromFile(tr_ctor* ctor, char const* filename);
@@ -907,9 +893,6 @@ bool tr_ctorGetDownloadDir(tr_ctor const* ctor, tr_ctorMode mode, char const** s
 /** @brief Get the incomplete directory from this peer constructor */
 bool tr_ctorGetIncompleteDir(tr_ctor const* ctor, char const** setmeIncompleteDir);
 
-/** @brief Get the metainfo from this peer constructor */
-bool tr_ctorGetMetainfo(tr_ctor const* ctor, struct tr_variant const** setme);
-
 /** @brief Get the "delete .torrent file" flag from this peer constructor */
 bool tr_ctorGetDeleteSource(tr_ctor const* ctor, bool* setmeDoDelete);
 
@@ -920,38 +903,13 @@ tr_session* tr_ctorGetSession(tr_ctor const* ctor);
            or nullptr if tr_ctorSetMetainfoFromFile() wasn't used */
 char const* tr_ctorGetSourceFile(tr_ctor const* ctor);
 
+// FIXME(ckerr): remove
 enum tr_parse_result
 {
     TR_PARSE_OK,
     TR_PARSE_ERR,
     TR_PARSE_DUPLICATE
 };
-
-/**
- * @brief Parses the specified metainfo
- *
- * @return TR_PARSE_ERR if parsing failed;
- *         TR_PARSE_OK if parsing succeeded and it's not a duplicate;
- *         TR_PARSE_DUPLICATE if parsing succeeded but it's a duplicate.
- *
- * @param setme_info_or_nullptr If parsing is successful and setme_info is non-nullptr,
- *                              the parsed metainfo is stored there and sould be freed
- *                              by calling tr_metainfoFree() when no longer needed.
- *
- * Notes:
- *
- * 1. tr_torrentParse() won't be able to check for duplicates -- and therefore
- *    won't return TR_PARSE_DUPLICATE -- unless ctor's "download-dir" and
- *    session variable is set.
- *
- * 2. setme_info->torrent's value can't be set unless ctor's session variable
- *    is set.
- */
-tr_parse_result tr_torrentParse(tr_ctor const* ctor, tr_info* setme_info_or_nullptr);
-
-/** @brief free a metainfo
-    @see tr_torrentParse */
-void tr_metainfoFree(tr_info* inf);
 
 /**
  * Instantiate a single torrent.

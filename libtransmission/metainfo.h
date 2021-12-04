@@ -29,6 +29,8 @@ enum tr_metainfo_basename_format
     TR_METAINFO_BASENAME_HASH
 };
 
+void tr_metainfoFree(tr_info* inf);
+
 struct tr_metainfo_parsed
 {
     tr_info info = {};

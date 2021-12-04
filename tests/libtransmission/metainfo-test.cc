@@ -6,17 +6,18 @@
  *
  */
 
-#include "transmission.h"
-
-#include "metainfo.h"
-#include "utils.h"
-
-#include "gtest/gtest.h"
-
 #include <array>
 #include <cerrno>
 #include <cstring>
 #include <string_view>
+
+#include "transmission.h"
+
+#include "metainfo.h"
+#include "torrent-metainfo.h"
+#include "utils.h"
+
+#include "gtest/gtest.h"
 
 using namespace std::literals;
 
@@ -31,34 +32,13 @@ TEST(Metainfo, magnetLink)
         "&tr=udp%3A%2F%2Ftracker.publicbt.com%3A80"
         "&ws=http%3A%2F%2Ftransmissionbt.com";
 
-    auto* ctor = tr_ctorNew(nullptr);
-    tr_ctorSetMetainfoFromMagnetLink(ctor, MagnetLink);
-    auto inf = tr_info{};
-    auto const parse_result = tr_torrentParse(ctor, &inf);
-    EXPECT_EQ(TR_PARSE_OK, parse_result);
-    EXPECT_EQ(0, inf.fileCount); // because it's a magnet link
-    EXPECT_EQ(2, inf.trackerCount);
-    if (inf.trackerCount >= 1)
-    {
-        EXPECT_STREQ("http://tracker.publicbt.com/announce", inf.trackers[0].announce);
-    }
-    if (inf.trackerCount >= 2)
-    {
-        EXPECT_STREQ("udp://tracker.publicbt.com:80", inf.trackers[1].announce);
-    }
-    EXPECT_EQ(1, inf.webseedCount);
-    if (inf.webseedCount >= 1)
-    {
-        EXPECT_STREQ("http://transmissionbt.com", inf.webseeds[0]);
-    }
-
-    auto* const link = tr_torrentInfoGetMagnetLink(&inf);
-    EXPECT_STREQ(MagnetLink, link);
-    tr_free(link);
-
-    /* cleanup */
-    tr_metainfoFree(&inf);
-    tr_ctorFree(ctor);
+    auto metainfo = tr_torrent_metainfo{};
+    EXPECT_TRUE(metainfo.parseMagnet(MagnetLink));
+    EXPECT_EQ(0, std::size(metainfo.files())); // because it's a magnet link
+    EXPECT_EQ(2, metainfo.trackerCount());
+    auto const n_tiers = std::size(metainfo.tiers());
+    EXPECT_EQ(2, n_tiers);
+    EXPECT_EQ(MagnetLink, metainfo.magnet());
 }
 
 #define BEFORE_PATH \
@@ -71,48 +51,33 @@ TEST(Metainfo, bucket)
 {
     struct LocalTest
     {
-        int expected_benc_err;
-        int expected_parse_result;
         std::string_view benc;
+        bool expected_parse_result;
     };
 
-    auto const tests = std::array<LocalTest, 9>{
-        LocalTest{ 0, TR_PARSE_OK, BEFORE_PATH "5:a.txt" AFTER_PATH },
-
-        /* allow empty components, but not =all= empty components, see bug #5517 */
-        { 0, TR_PARSE_OK, BEFORE_PATH "0:5:a.txt" AFTER_PATH },
-        { 0, TR_PARSE_ERR, BEFORE_PATH "0:0:" AFTER_PATH },
-
-        /* allow path separators in a filename (replaced with '_') */
-        { 0, TR_PARSE_OK, BEFORE_PATH "7:a/a.txt" AFTER_PATH },
-
-        /* allow "." components (skipped) */
-        { 0, TR_PARSE_OK, BEFORE_PATH "1:.5:a.txt" AFTER_PATH },
-        { 0, TR_PARSE_OK, BEFORE_PATH "5:a.txt1:." AFTER_PATH },
-
-        /* allow ".." components (replaced with "__") */
-        { 0, TR_PARSE_OK, BEFORE_PATH "2:..5:a.txt" AFTER_PATH },
-        { 0, TR_PARSE_OK, BEFORE_PATH "5:a.txt2:.." AFTER_PATH },
-
-        /* fail on empty string */
-        { EILSEQ, TR_PARSE_ERR, "" },
-    };
+    auto const tests = std::array<LocalTest, 9>{ {
+        { BEFORE_PATH "5:a.txt" AFTER_PATH, true },
+        // allow empty components, but not =all= empty components, see bug #5517
+        { BEFORE_PATH "0:5:a.txt" AFTER_PATH, true },
+        { BEFORE_PATH "0:0:" AFTER_PATH, false },
+        // allow path separators in a filename (replaced with '_')
+        { BEFORE_PATH "7:a/a.txt" AFTER_PATH, true },
+        // allow "." components (skipped)
+        { BEFORE_PATH "1:.5:a.txt" AFTER_PATH, true },
+        { BEFORE_PATH "5:a.txt1:." AFTER_PATH, true },
+        // allow ".." components (replaced with "__")
+        { BEFORE_PATH "2:..5:a.txt" AFTER_PATH, true },
+        { BEFORE_PATH "5:a.txt2:.." AFTER_PATH, true },
+        // fail on empty string
+        { "", false },
+    } };
 
     tr_logSetLevel(TR_LOG_SILENT);
 
     for (auto const& test : tests)
     {
-        auto* ctor = tr_ctorNew(nullptr);
-        int const err = tr_ctorSetMetainfo(ctor, std::data(test.benc), std::size(test.benc));
-        EXPECT_EQ(test.expected_benc_err, err);
-
-        if (err == 0)
-        {
-            tr_parse_result const parse_result = tr_torrentParse(ctor, nullptr);
-            EXPECT_EQ(test.expected_parse_result, parse_result);
-        }
-
-        tr_ctorFree(ctor);
+        auto metainfo = tr_torrent_metainfo{};
+        EXPECT_EQ(test.expected_parse_result, metainfo.parseBenc(test.benc));
     }
 }
 
@@ -176,13 +141,6 @@ TEST(Metainfo, sanitize)
 
 TEST(Metainfo, AndroidTorrent)
 {
-    auto* ctor = tr_ctorNew(nullptr);
-
-    auto filename = std::string{ LIBTRANSMISSION_TEST_ASSETS_DIR };
-    filename += '/'; // FIXME
-    filename += "Android-x86 8.1 r6 iso.torrent";
-    auto const err = tr_ctorSetMetainfoFromFile(ctor, filename.c_str());
-    EXPECT_EQ(0, err);
-
-    tr_ctorFree(ctor);
+    auto metainfo = tr_torrent_metainfo();
+    EXPECT_TRUE(metainfo.parseTorrentFile(tr_strvJoin(LIBTRANSMISSION_TEST_ASSETS_DIR, "/Android-x86 8.1 r6 iso.torrent"sv)));
 }

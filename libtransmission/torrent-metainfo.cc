@@ -6,6 +6,7 @@
  *
  */
 
+#include <algorithm>
 #include <iterator>
 #include <numeric>
 #include <string>
@@ -26,6 +27,11 @@
 #include "web-utils.h"
 
 using namespace std::literals;
+
+void tr_new_magnet_metainfo::clear()
+{
+    *this = tr_new_magnet_metainfo{};
+}
 
 #if 0
 bool tr_convertAnnounceToScrape(std::string& out, std::string_view in)
@@ -476,6 +482,11 @@ size_t tr_new_magnet_metainfo::trackerCount() const
         std::end(tiers_),
         size_t{},
         [](int sum, auto const& tier) { return sum + std::size(tier); });
+}
+
+void tr_torrent_metainfo::clear()
+{
+    *this = tr_torrent_metainfo{};
 }
 
 /**

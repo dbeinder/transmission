@@ -52,6 +52,10 @@ void tr_ctorInitTorrentPriorities(tr_ctor const* ctor, tr_torrent* tor);
 
 void tr_ctorInitTorrentWanted(tr_ctor const* ctor, tr_torrent* tor);
 
+std::string_view tr_ctorGetContents(tr_ctor const* ctor);
+
+bool tr_ctorSaveContents(tr_ctor const* ctor, char const* filename, tr_error** error);
+
 /**
 ***
 **/
