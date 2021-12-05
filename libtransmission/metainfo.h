@@ -29,7 +29,7 @@ enum tr_metainfo_basename_format
     TR_METAINFO_BASENAME_HASH
 };
 
-void tr_metainfoFree(tr_info* inf);
+void tr_metainfoDestruct(tr_info* inf);
 
 struct tr_metainfo_parsed
 {
@@ -52,7 +52,7 @@ struct tr_metainfo_parsed
 
     ~tr_metainfo_parsed()
     {
-        tr_metainfoFree(&info);
+        tr_metainfoDestruct(&info);
     }
 };
 

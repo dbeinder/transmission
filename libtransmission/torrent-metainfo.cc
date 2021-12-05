@@ -398,7 +398,7 @@ tr_torrent_metainfo_tracker_info* tr_torrentMetainfoTracker(
 #endif
 
 #if 0
-void tr_metainfoFree(tr_info* inf)
+void tr_metainfoDestruct(tr_info* inf)
 {
     for (unsigned int i = 0; i < inf->webseedCount; i++)
     {

@@ -848,8 +848,6 @@ int tr_ctorSetMetainfoFromMagnetLink(tr_ctor* ctor, char const* magnet);
 /** @brief Set the constructor's metainfo from a raw benc already in memory */
 int tr_ctorSetMetainfo(tr_ctor* ctor, char const* metainfo, size_t len);
 
-struct tr_torrent_metainfo const* tr_ctorGetMetainfo(tr_ctor const* ctor);
-
 /** @brief Set the constructor's metainfo from a local .torrent file */
 int tr_ctorSetMetainfoFromFile(tr_ctor* ctor, char const* filename);
 
@@ -890,14 +888,8 @@ bool tr_ctorGetPaused(tr_ctor const* ctor, tr_ctorMode mode, bool* setmeIsPaused
 /** @brief Get the download path from this peer constructor */
 bool tr_ctorGetDownloadDir(tr_ctor const* ctor, tr_ctorMode mode, char const** setmeDownloadDir);
 
-/** @brief Get the incomplete directory from this peer constructor */
-bool tr_ctorGetIncompleteDir(tr_ctor const* ctor, char const** setmeIncompleteDir);
-
 /** @brief Get the "delete .torrent file" flag from this peer constructor */
 bool tr_ctorGetDeleteSource(tr_ctor const* ctor, bool* setmeDoDelete);
-
-/** @brief Get the tr_session poiner from this peer constructor */
-tr_session* tr_ctorGetSession(tr_ctor const* ctor);
 
 /** @brief Get the .torrent file that this ctor's metainfo came from,
            or nullptr if tr_ctorSetMetainfoFromFile() wasn't used */

@@ -96,6 +96,20 @@ char const* tr_ctorGetSourceFile(tr_ctor const* ctor)
     return ctor->metainfo.parsedTorrentFile().c_str();
 }
 
+bool tr_ctorSaveContents(tr_ctor const* ctor, char const* filename, tr_error** error)
+{
+    TR_ASSERT(ctor != nullptr);
+    TR_ASSERT(filename != nullptr);
+
+    if (std::empty(ctor->contents))
+    {
+        tr_error_set_literal(error, EINVAL, "torrent ctor has no contents to save");
+        return false;
+    }
+
+    return tr_saveFile(filename, { std::data(ctor->contents), std::size(ctor->contents) }, error);
+}
+
 /***
 ****
 ***/
@@ -169,18 +183,6 @@ bool tr_ctorGetDeleteSource(tr_ctor const* ctor, bool* setme)
 void tr_ctorSetSave(tr_ctor* ctor, bool saveInOurTorrentsDir)
 {
     ctor->saveInOurTorrentsDir = saveInOurTorrentsDir;
-}
-
-bool tr_ctorSaveContents(tr_ctor const* ctor, char const* filename, tr_error** error)
-{
-    auto const contents = tr_ctorGetContents(ctor);
-    if (std::empty(contents))
-    {
-        tr_error_set_literal(error, EILSEQ, "No contents available");
-        return false;
-    }
-
-    return tr_saveFile(filename, contents, error);
 }
 
 bool tr_ctorGetSave(tr_ctor const* ctor)
@@ -317,7 +319,7 @@ tr_priority_t tr_ctorGetBandwidthPriority(tr_ctor const* ctor)
 ****
 ***/
 
-tr_ctor* tr_ctorNew(tr_session const* session)
+tr_ctor* tr_ctorNew(tr_session* session)
 {
     auto* const ctor = new tr_ctor{ session };
 

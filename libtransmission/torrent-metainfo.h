@@ -161,6 +161,16 @@ public:
 
     std::string benc() const;
 
+    auto infoDictSize() const
+    {
+        return info_dict_size_;
+    }
+
+    auto infoDictOffset() const
+    {
+        return info_dict_offset_;
+    }
+
 private:
     static char* parsePath(std::string_view root, tr_variant* path, std::string& buf);
     static std::string fixWebseedUrl(tr_torrent_metainfo const& tm, std::string_view url);
@@ -249,7 +259,7 @@ struct tr_metainfo_parsed
 
     ~tr_metainfo_parsed()
     {
-        tr_metainfoFree(&info);
+        tr_metainfoDestruct(&info);
     }
 };
 

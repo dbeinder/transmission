@@ -390,30 +390,30 @@ bool tr_saveFile(char const* filename_in, std::string_view contents, tr_error** 
         tr_free(real_filename);
     }
 
-    // write it to a temp file first
+    // Write it to a temp file first.
+    // This is a safeguard against edge cases, e.g. disk full, crash while writing, etc.
     auto tmp = tr_strvJoin(filename, ".tmp.XXXXXX"sv);
     auto const fd = tr_sys_file_open_temp(std::data(tmp), error);
     if (fd == TR_BAD_SYS_FILE)
     {
         return false;
     }
+
+    // Save the contents. This might take >1 pass.
+    auto ok = bool{ true };
     while (!std::empty(contents))
     {
         auto n_written = uint64_t{};
         if (!tr_sys_file_write(fd, std::data(contents), std::size(contents), &n_written, error))
         {
+            ok = false;
             break;
         }
         contents.remove_prefix(n_written);
     }
-    tr_sys_file_close(fd, error);
 
-    if (error != nullptr)
-    {
-        return false;
-    }
-
-    if (!tr_sys_path_rename(tmp.c_str(), filename.c_str(), error))
+    // If we saved it to disk successfully, move it from '.tmp' to the correct filename
+    if (!tr_sys_file_close(fd, error) || !ok || !tr_sys_path_rename(tmp.c_str(), filename.c_str(), error))
     {
         return false;
     }

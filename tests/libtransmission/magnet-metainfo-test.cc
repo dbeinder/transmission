@@ -19,11 +19,10 @@ using namespace std::literals;
 
 TEST(MagnetMetainfo, magnetParse)
 {
-    auto constexpr ExpectedHash = tr_sha1_digest_t{ std::byte(210), std::byte(53),  std::byte(64),  std::byte(16),
-                                                    std::byte(163), std::byte(202), std::byte(74),  std::byte(222),
-                                                    std::byte(91),  std::byte(116), std::byte(39),  std::byte(187),
-                                                    std::byte(9),   std::byte(58),  std::byte(98),  std::byte(163),
-                                                    std::byte(137), std::byte(159), std::byte(243), std::byte(129) };
+    auto constexpr ExpectedHash = tr_sha1_digest_t{ tr_byte(210), tr_byte(53),  tr_byte(64),  tr_byte(16),  tr_byte(163),
+                                                    tr_byte(202), tr_byte(74),  tr_byte(222), tr_byte(91),  tr_byte(116),
+                                                    tr_byte(39),  tr_byte(187), tr_byte(9),   tr_byte(58),  tr_byte(98),
+                                                    tr_byte(163), tr_byte(137), tr_byte(159), tr_byte(243), tr_byte(129) };
 
     auto constexpr UriHex =
         "magnet:?xt=urn:btih:"

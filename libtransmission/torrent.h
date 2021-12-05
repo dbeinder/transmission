@@ -37,6 +37,7 @@ struct tr_metainfo_parsed;
 struct tr_session;
 struct tr_torrent;
 struct tr_torrent_tiers;
+struct tr_torrent_metainfo;
 
 /**
 ***  Package-visible ctor API
@@ -52,9 +53,13 @@ void tr_ctorInitTorrentPriorities(tr_ctor const* ctor, tr_torrent* tor);
 
 void tr_ctorInitTorrentWanted(tr_ctor const* ctor, tr_torrent* tor);
 
-std::string_view tr_ctorGetContents(tr_ctor const* ctor);
-
 bool tr_ctorSaveContents(tr_ctor const* ctor, char const* filename, tr_error** error);
+
+struct tr_torrent_metainfo const* tr_ctorGetMetainfo(tr_ctor const* ctor);
+
+tr_session* tr_ctorGetSession(tr_ctor const* ctor);
+
+bool tr_ctorGetIncompleteDir(tr_ctor const* ctor, char const** setmeIncompleteDir);
 
 /**
 ***
@@ -125,6 +130,10 @@ struct tr_torrent
     , public tr_completion::torrent_view
 {
 public:
+    static tr_torrent* Create(tr_ctor const* ctor, int* setme_error, int* setme_duplicate_id);
+
+    void setMetainfoFromMagnet(tr_torrent_metainfo const* metainfo);
+
     tr_torrent(tr_info const& inf)
         : tr_block_info{ inf.totalSize, inf.pieceSize }
         , completion{ this, this }
@@ -244,7 +253,7 @@ public:
 
     /// WANTED
 
-    bool pieceIsWanted(tr_piece_index_t piece) const final
+    bool pieceIsWanted(tr_piece_index_t piece) const final override
     {
         return files_wanted_.pieceWanted(piece);
     }

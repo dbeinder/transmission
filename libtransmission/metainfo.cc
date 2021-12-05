@@ -630,14 +630,14 @@ std::optional<tr_metainfo_parsed> tr_metainfoParse(tr_session const* session, tr
     if (bad_tag != nullptr)
     {
         tr_error_set(error, TR_ERROR_EINVAL, _("Error parsing metainfo: %s"), bad_tag);
-        tr_metainfoFree(&out.info);
+        tr_metainfoDestruct(&out.info);
         return {};
     }
 
     return std::optional<tr_metainfo_parsed>{ std::move(out) };
 }
 
-void tr_metainfoFree(tr_info* inf)
+void tr_metainfoDestruct(tr_info* inf)
 {
     for (unsigned int i = 0; i < inf->webseedCount; i++)
     {

@@ -20,6 +20,7 @@
 #include "metainfo.h"
 #include "resume.h"
 #include "torrent-magnet.h"
+#include "torrent-metainfo.h"
 #include "torrent.h"
 #include "tr-assert.h"
 #include "utils.h"
@@ -294,19 +295,15 @@ void tr_torrentSetMetadataPiece(tr_torrent* tor, int piece, void const* data, in
 
                     dbgmsg(tor, "Saving completed metadata to \"%s\"", path);
                     tr_variantMergeDicts(tr_variantDictAddDict(&newMetainfo, TR_KEY_info, 0), &infoDict);
-
-                    auto info = tr_metainfoParse(tor->session, &newMetainfo, nullptr);
-                    success = !!info;
-                    if (info && tr_block_info::bestBlockSize(info->info.pieceSize) == 0)
-                    {
-                        tr_torrentSetLocalError(tor, "%s", _("Magnet torrent's metadata is not usable"));
-                        success = false;
-                    }
-
+                    auto metainfo = tr_torrent_metainfo{};
+                    auto benc_len = size_t{};
+                    auto* const benc = tr_variantToStr(&newMetainfo, TR_VARIANT_FMT_JSON, &benc_len);
+                    success = metainfo.parseBenc({ benc, benc_len });
+                    tr_free(benc);
                     if (success)
                     {
                         /* tor should keep this metainfo */
-                        tor->swapMetainfo(*info);
+                        tor->setMetainfoFromMagnet(&metainfo);
 
                         /* save the new .torrent file */
                         tr_variantToFile(&newMetainfo, TR_VARIANT_FMT_BENC, tor->info.torrent);
