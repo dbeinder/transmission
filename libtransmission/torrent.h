@@ -20,6 +20,7 @@
 
 #include "transmission.h"
 
+#include "announce-list.h"
 #include "bandwidth.h"
 #include "bitfield.h"
 #include "block-info.h"
@@ -36,8 +37,8 @@ struct tr_magnet_info;
 struct tr_metainfo_parsed;
 struct tr_session;
 struct tr_torrent;
-struct tr_torrent_tiers;
 struct tr_torrent_metainfo;
+struct tr_announcer_tiers;
 
 /**
 ***  Package-visible ctor API
@@ -253,7 +254,7 @@ public:
 
     /// WANTED
 
-    bool pieceIsWanted(tr_piece_index_t piece) const final override
+    bool pieceIsWanted(tr_piece_index_t piece) const final
     {
         return files_wanted_.pieceWanted(piece);
     }
@@ -294,6 +295,82 @@ public:
         setDirty();
     }
 
+    /// FILES
+
+    tr_file_index_t fileCount() const
+    {
+        return info.fileCount;
+    }
+
+    auto& file(tr_file_index_t i)
+    {
+        TR_ASSERT(i < this->fileCount());
+
+        return info.files[i];
+    }
+
+    auto const& file(tr_file_index_t i) const
+    {
+        TR_ASSERT(i < this->fileCount());
+
+        return info.files[i];
+    }
+
+    struct tr_found_file_t : public tr_sys_path_info
+    {
+        std::string& filename; // /home/foo/Downloads/torrent/01-file-one.txt
+        std::string_view base; // /home/foo/Downloads
+        std::string_view subpath; // /torrent/01-file-one.txt
+
+        tr_found_file_t(tr_sys_path_info info, std::string& f, std::string_view b)
+            : tr_sys_path_info{ info }
+            , filename{ f }
+            , base{ b }
+            , subpath{ f.c_str() + std::size(b) + 1 }
+        {
+        }
+    };
+
+    std::optional<tr_found_file_t> findFile(std::string& filename, tr_file_index_t i) const;
+
+    /// TRACKERS
+
+    auto trackerCount() const
+    {
+        return std::size(*info.announce_list);
+    }
+
+    auto const& tracker(size_t i) const
+    {
+        return info.announce_list->at(i);
+    }
+
+    auto tiers() const
+    {
+        return info.announce_list->tiers();
+    }
+
+    /// WEBSEEDS
+
+    auto webseedCount() const
+    {
+        return info.webseedCount;
+    }
+
+    auto const& webseed(size_t i) const
+    {
+        TR_ASSERT(i < webseedCount());
+
+        return info.webseeds[i];
+    }
+
+    auto& webseed(size_t i)
+    {
+        TR_ASSERT(i < webseedCount());
+
+        return info.webseeds[i];
+    }
+
     /// CHECKSUMS
 
     bool ensurePieceIsChecked(tr_piece_index_t piece)
@@ -313,18 +390,18 @@ public:
         return checked;
     }
 
-    void initCheckedPieces(tr_bitfield const& checked, time_t const* mtimes /*fileCount*/)
+    void initCheckedPieces(tr_bitfield const& checked, time_t const* mtimes /*fileCount()*/)
     {
         TR_ASSERT(std::size(checked) == info.pieceCount);
         checked_pieces_ = checked;
 
         auto filename = std::string{};
-        for (size_t i = 0; i < info.fileCount; ++i)
+        for (size_t i = 0, n = this->fileCount(); i < n; ++i)
         {
             auto const found = this->findFile(filename, i);
             auto const mtime = found ? found->last_modified_at : 0;
 
-            info.files[i].priv.mtime = mtime;
+            this->file(i).priv.mtime = mtime;
 
             // if a file has changed, mark its pieces as unchecked
             if (mtime == 0 || mtime != mtimes[i])
@@ -335,28 +412,7 @@ public:
         }
     }
 
-    /// FINDING FILES
-
-    struct tr_found_file_t : public tr_sys_path_info
-    {
-        std::string& filename; // /home/foo/Downloads/torrent/01-file-one.txt
-        std::string_view base; // /home/foo/Downloads
-        std::string_view subpath; // /torrent/01-file-one.txt
-
-        tr_found_file_t(tr_sys_path_info info, std::string& f, std::string_view b)
-            : tr_sys_path_info{ info }
-            , filename{ f }
-            , base{ b }
-            , subpath{ f.c_str() + std::size(b) + 1 }
-        {
-        }
-    };
-
-    std::optional<tr_found_file_t> findFile(std::string& filename, tr_file_index_t i) const;
-
     tr_info info = {};
-
-    tr_bitfield dnd_pieces_ = tr_bitfield{ 0 };
 
     tr_bitfield checked_pieces_ = tr_bitfield{ 0 };
 
@@ -365,7 +421,7 @@ public:
 
     tr_session* session = nullptr;
 
-    struct tr_torrent_tiers* tiers = nullptr;
+    tr_announcer_tiers* announcer_tiers = nullptr;
 
     // Changed to non-owning pointer temporarily till tr_torrent becomes C++-constructible and destructible
     // TODO: change tr_bandwidth* to owning pointer to the bandwidth, or remove * and own the value
@@ -643,3 +699,5 @@ constexpr tr_direction tr_torrentGetQueueDirection(tr_torrent const* tor)
 {
     return tr_torrentIsSeed(tor) ? TR_UP : TR_DOWN;
 }
+
+tr_info const* tr_torrentInfo(tr_torrent const* torrent);

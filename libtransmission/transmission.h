@@ -20,6 +20,7 @@
 ****
 ***/
 
+#include <memory>
 #include <stdbool.h> /* bool */
 #include <stddef.h> /* size_t */
 #include <stdint.h> /* uintN_t */
@@ -35,6 +36,9 @@ using tr_piece_index_t = uint32_t;
 using tr_block_index_t = uint32_t;
 using tr_port = uint16_t;
 using tr_tracker_tier_t = uint32_t;
+using tr_tracker_id_t = uint32_t;
+
+#include "announce-list.h"
 
 struct tr_block_span_t
 {
@@ -955,17 +959,17 @@ using tr_torrent_rename_done_func = void (*)( //
  * @param callback_data the pointer to pass in the callback's user_data arg
  *
  * As a special case, renaming the root file in a torrent will also
- * update tr_info.name.
+ * update tr_torrentName().
  *
  * EXAMPLES
  *
  *   Consider a tr_torrent where its
- *   info.files[0].name is "frobnitz-linux/checksum" and
- *   info.files[1].name is "frobnitz-linux/frobnitz.iso".
+ *   tr_torrentFile(tor, 0).name is "frobnitz-linux/checksum" and
+ *   tr_torrentFile(tor, 1).name is "frobnitz-linux/frobnitz.iso".
  *
  *   1. tr_torrentRenamePath(tor, "frobnitz-linux", "foo") will rename
- *      the "frotbnitz-linux" folder as "foo", and update both info.name
- *      and info.files[*].name.
+ *      the "frotbnitz-linux" folder as "foo", and update both
+ *      tr_torrentName(tor) and tr_torrentFile(tor, *).name.
  *
  *   2. tr_torrentRenamePath(tor, "frobnitz-linux/checksum", "foo") will
  *      rename the "frobnitz-linux/checksum" file as "foo" and update
@@ -973,9 +977,10 @@ using tr_torrent_rename_done_func = void (*)( //
  *
  * RETURN
  *
- *   Changing tr_info's contents requires a session lock, so this function
- *   returns asynchronously to avoid blocking. If you don't want to be notified
- *   when the function has finished, you can pass nullptr as the callback arg.
+ *   Changing the torrent's internal fields requires a session thread lock,
+ *   so this function returns asynchronously to avoid blocking. If you don't
+ *   want to be notified when the function has finished, you can pass nullptr
+ *   as the callback arg.
  *
  *   On success, the callback's error argument will be 0.
  *
@@ -1019,9 +1024,8 @@ uint64_t tr_torrentGetBytesLeftToAllocate(tr_torrent const* torrent);
 /**
  * @brief Returns this torrent's unique ID.
  *
- * IDs are good as simple lookup keys, but are not persistent
- * between sessions. If you need that, use tr_info.hash or
- * tr_info.hashString.
+ * IDs are fast lookup keys, but are not persistent between sessions.
+ * If you need that, use tr_torrentView().hash_string.
  */
 int tr_torrentId(tr_torrent const* torrent);
 
@@ -1039,6 +1043,8 @@ tr_torrent* tr_torrentFindFromMagnetLink(tr_session* session, char const* link);
  */
 char const* tr_torrentName(tr_torrent const*);
 
+uint64_t tr_torrentTotalSize(tr_torrent const*);
+
 /**
  * @brief find the location of a torrent's file by looking with and without
  *        the ".part" suffix, looking in downloadDir and incompleteDir, etc.
@@ -1046,7 +1052,7 @@ char const* tr_torrentName(tr_torrent const*);
  *         when done) that gives the location of this file on disk,
  *         or nullptr if no file exists yet.
  * @param tor the torrent whose file we're looking for
- * @param fileNum the fileIndex, in [0...tr_info.fileCount)
+ * @param fileNum the fileIndex, in [0...tr_torrentFileCount())
  */
 char* tr_torrentFindFile(tr_torrent const* tor, tr_file_index_t fileNum);
 
@@ -1145,8 +1151,6 @@ void tr_torrentSetFilePriorities(
 /** @brief Set a batch of files to be downloaded or not. */
 void tr_torrentSetFileDLs(tr_torrent* torrent, tr_file_index_t const* files, tr_file_index_t fileCount, bool do_download);
 
-tr_info const* tr_torrentInfo(tr_torrent const* torrent);
-
 /* Raw function to change the torrent's downloadDir field.
    This should only be used by libtransmission or to bootstrap
    a newly-instantiated tr_torrent object. */
@@ -1169,23 +1173,11 @@ char* tr_torrentInfoGetMagnetLink(tr_info const* inf);
  * Returns a newly-allocated string with a magnet link of the torrent.
  * Use tr_free() to free the string when done.
  */
-static inline char* tr_torrentGetMagnetLink(tr_torrent const* tor)
-{
-    return tr_torrentInfoGetMagnetLink(tr_torrentInfo(tor));
-}
+char* tr_torrentGetMagnetLink(tr_torrent const* tor);
 
 /**
 ***
 **/
-
-/** @brief a part of tr_info that represents a single tracker */
-struct tr_tracker_info
-{
-    int tier;
-    char* announce;
-    char* scrape;
-    uint32_t id; /* unique identifier used to match to a tr_tracker_stat */
-};
 
 /**
  * @brief Modify a torrent's tracker list.
@@ -1194,13 +1186,11 @@ struct tr_tracker_info
  * and the metainfo file in tr_sessionGetConfigDir()'s torrent subdirectory.
  *
  * @param torrent The torrent whose tracker list is to be modified
- * @param trackers An array of trackers, sorted by tier from first to last.
- *                 NOTE: only the `tier' and `announce' fields are used.
- *                 libtransmission derives `scrape' from `announce'
- *                 and reassigns 'id'.
- * @param trackerCount size of the `trackers' array
+ * @param urls Array of n announce url strings
+ * @param tiers Array of n tier numbers for grouping 'urls' into tiers
+ * @param n the number of urls/tiers
  */
-bool tr_torrentSetAnnounceList(tr_torrent* torrent, tr_tracker_info const* trackers, int trackerCount);
+bool tr_torrentSetAnnounceList(tr_torrent* torrent, char const* const* announce_urls, tr_tracker_tier_t const* tiers, size_t n);
 
 /**
 ***
@@ -1366,147 +1356,109 @@ enum tr_tracker_state
     TR_TRACKER_ACTIVE = 3
 };
 
-struct tr_tracker_stat
+/*
+ * Unlike other _view structs, it is safe to keep a tr_tracker_view copy.
+ * The announce, scrape, and host strings are interned & never go out-of-scope.
+ */
+struct tr_tracker_view
 {
-    /* how many downloads this tracker knows of (-1 means it does not know) */
-    int downloadCount;
+    char const* announce; // full announce URL
+    char const* scrape; // full scrape URL
+    char const* host; // human-readable tracker name. (`${host}:${port}`)
 
-    /* whether or not we've ever sent this tracker an announcement */
-    bool hasAnnounced;
+    char lastAnnounceResult[128]; // if hasAnnounced, the human-readable result of latest announce
+    char lastScrapeResult[128]; // if hasScraped, the human-readable result of the latest scrape
 
-    /* whether or not we've ever scraped to this tracker */
-    bool hasScraped;
+    time_t lastAnnounceStartTime; // if hasAnnounced, when the latest announce request was sent
+    time_t lastAnnounceTime; // if hasAnnounced, when the latest announce reply was received
+    time_t nextAnnounceTime; // if announceState == TR_TRACKER_WAITING, time of next announce
 
-    /* human-readable string identifying the tracker.
-     * 'host' is a slight misnomer; the current format ist `$host:$port` */
-    char const* host;
+    time_t lastScrapeStartTime; // if hasScraped, when the latest scrape request was sent
+    time_t lastScrapeTime; // if hasScraped, when the latest scrape reply was received
+    time_t nextScrapeTime; // if scrapeState == TR_TRACKER_WAITING, time of next scrape
 
-    /* the full announce URL */
-    char const* announce;
+    int downloadCount; // number of times this torrent's been downloaded, or -1 if unknown
+    int lastAnnouncePeerCount; // if hasAnnounced, the number of peers the tracker gave us
+    int leecherCount; // number of leechers the tracker knows of, or -1 if unknown
+    int seederCount; // number of seeders the tracker knows of, or -1 if  unknown
 
-    /* the full scrape URL */
-    char const* scrape;
+    int tier; // which tier this tracker is in
+    int id; // unique transmission-generated ID for use in libtransmission API
 
-    /* Transmission uses one tracker per tier,
-     * and the others are kept as backups */
-    bool isBackup;
+    tr_tracker_state announceState; // whether we're announcing, waiting to announce, etc.
+    tr_tracker_state scrapeState; // whether we're scraping, waiting to scrape, etc.
 
-    /* is the tracker announcing, waiting, queued, etc */
-    tr_tracker_state announceState;
-
-    /* is the tracker scraping, waiting, queued, etc */
-    tr_tracker_state scrapeState;
-
-    /* number of peers the tracker told us about last time.
-     * if "lastAnnounceSucceeded" is false, this field is undefined */
-    int lastAnnouncePeerCount;
-
-    /* human-readable string with the result of the last announce.
-       if "hasAnnounced" is false, this field is undefined */
-    char lastAnnounceResult[128];
-
-    /* when the last announce was sent to the tracker.
-     * if "hasAnnounced" is false, this field is undefined */
-    time_t lastAnnounceStartTime;
-
-    /* whether or not the last announce was a success.
-       if "hasAnnounced" is false, this field is undefined */
-    bool lastAnnounceSucceeded;
-
-    /* whether or not the last announce timed out. */
-    bool lastAnnounceTimedOut;
-
-    /* when the last announce was completed.
-       if "hasAnnounced" is false, this field is undefined */
-    time_t lastAnnounceTime;
-
-    /* human-readable string with the result of the last scrape.
-     * if "hasScraped" is false, this field is undefined */
-    char lastScrapeResult[128];
-
-    /* when the last scrape was sent to the tracker.
-     * if "hasScraped" is false, this field is undefined */
-    time_t lastScrapeStartTime;
-
-    /* whether or not the last scrape was a success.
-       if "hasAnnounced" is false, this field is undefined */
-    bool lastScrapeSucceeded;
-
-    /* whether or not the last scrape timed out. */
-    bool lastScrapeTimedOut;
-
-    /* when the last scrape was completed.
-       if "hasScraped" is false, this field is undefined */
-    time_t lastScrapeTime;
-
-    /* number of leechers this tracker knows of (-1 means it does not know) */
-    int leecherCount;
-
-    /* when the next periodic announce message will be sent out.
-       if announceState isn't TR_TRACKER_WAITING, this field is undefined */
-    time_t nextAnnounceTime;
-
-    /* when the next periodic scrape message will be sent out.
-       if scrapeState isn't TR_TRACKER_WAITING, this field is undefined */
-    time_t nextScrapeTime;
-
-    /* number of seeders this tracker knows of (-1 means it does not know) */
-    int seederCount;
-
-    /* which tier this tracker is in */
-    int tier;
-
-    /* used to match to a tr_tracker_info */
-    uint32_t id;
+    bool hasAnnounced; // true iff we've announced to this tracker during this session
+    bool hasScraped; // true iff we've scraped this tracker during this session
+    bool isBackup; // only one tracker per tier is used; the others are kept as backups
+    bool lastAnnounceSucceeded; // if hasAnnounced, whether or not the latest announce succeeded
+    bool lastAnnounceTimedOut; // true iff the latest announce request timed out
+    bool lastScrapeSucceeded; // if hasScraped, whether or not the latest scrape succeeded
+    bool lastScrapeTimedOut; // true iff the latest scrape request timed out
 };
 
-tr_tracker_stat* tr_torrentTrackers(tr_torrent const* torrent, int* setmeTrackerCount);
+struct tr_tracker_view tr_torrentTracker(tr_torrent const* torrent, size_t i);
 
-void tr_torrentTrackersFree(tr_tracker_stat* trackerStats, int trackerCount);
+size_t tr_torrentTrackerCount(tr_torrent const* torrent);
 
-/**
- * @brief get the download speeds for each of this torrent's webseed sources.
- *
- * @return an array of tor->info.webseedCount floats giving download speeds.
- *         Each speed in the array corresponds to the webseed at the same
- *         array index in tor->info.webseeds.
- *         To differentiate "idle" and "stalled" status, idle webseeds will
- *         return -1 instead of 0 KiB/s.
- *         NOTE: always free this array with tr_free() when you're done with it.
+/*
+ * This view structure is intended for short-term use. Its pointers are owned
+ * by the torrent and may be invalidated if the torrent is edited or removed.
  */
-double* tr_torrentWebSpeeds_KBps(tr_torrent const* torrent);
-
 struct tr_file_view
 {
-    // This file's name. Includes the full subpath in the torrent.
-    char const* name;
-
-    // the current size of the file, i.e. how much we've downloaded
-    uint64_t have;
-
-    // the total size of the file
-    uint64_t length;
-
-    // have / length
-    double progress;
-
-    // the file's priority
-    tr_priority_t priority;
-
-    // do we want to download this file?
-    bool wanted;
+    char const* name; // This file's name. Includes the full subpath in the torrent.
+    uint64_t have; // the current size of the file, i.e. how much we've downloaded
+    uint64_t length; // the total size of the file
+    double progress; // have / length
+    tr_priority_t priority; // the file's priority
+    bool wanted; // do we want to download this file?
 };
-
-/**
- * Returns a tr_file_view containing information about a file.
- *
- * This view structure is intended for short-term use. Pointers in it are
- * owned and managed by the torrent. Callers who want to keep this info
- * must make their own copy.
- */
 tr_file_view tr_torrentFile(tr_torrent const* torrent, tr_file_index_t file);
 
 size_t tr_torrentFileCount(tr_torrent const* torrent);
+
+/*
+ * This view structure is intended for short-term use. Its pointers are owned
+ * by the torrent and may be invalidated if the torrent is edited or removed.
+ */
+struct tr_webseed_view
+{
+    char const* url; // the url to download from
+    bool is_downloading; // can be true even if speed is 0, e.g. slow download
+    unsigned download_bytes_per_second; // current download speed
+};
+
+struct tr_webseed_view tr_torrentWebseed(tr_torrent const* torrent, size_t nth);
+
+size_t tr_torrentWebseedCount(tr_torrent const* torrent);
+
+/*
+ * This view structure is intended for short-term use. Its pointers are owned
+ * by the torrent and may be invalidated if the torrent is edited or removed.
+ */
+struct tr_torrent_view
+{
+    char const* name;
+    char const* hash_string;
+    char const* torrent_filename;
+
+    char const* comment; // optional; may be nullptr
+    char const* creator; // optional; may be nullptr
+    char const* source; // optional; may be nullptr
+
+    uint64_t total_size; // total size of the torrent, in bytes
+
+    time_t date_created;
+
+    uint32_t piece_size;
+    tr_piece_index_t n_pieces;
+
+    bool is_private;
+    bool is_folder;
+};
+
+struct tr_torrent_view tr_torrentView(tr_torrent const* tor);
 
 /***********************************************************************
  * tr_torrentAvailability
@@ -1550,6 +1502,7 @@ struct tr_file_priv
     time_t mtime;
     bool is_renamed; // true if we're using a different path from the one in the metainfo; ie, if the user has renamed it */
 };
+
 /** @brief a part of tr_info that represents a single file of the torrent's content */
 struct tr_file
 {
@@ -1566,10 +1519,6 @@ struct tr_info
 {
     /* total size of the torrent, in bytes */
     uint64_t totalSize;
-
-    /* The original name that came in this torrent's metainfo.
-     * CLIENT CODE: NOT USE THIS FIELD. */
-    char* originalName;
 
     /* The torrent's name. */
     char* name;
@@ -1589,13 +1538,12 @@ struct tr_info
     // Use tr_torrentFile() and tr_torrentFileCount() instead.
     tr_file* files;
 
-    /* these trackers are sorted by tier */
-    tr_tracker_info* trackers;
+    // TODO(ckerr) aggregate this directly, rather than  using a shared_ptr, when tr_info is private
+    std::shared_ptr<tr_announce_list> announce_list;
 
     /* Torrent info */
     time_t dateCreated;
 
-    unsigned int trackerCount;
     unsigned int webseedCount;
     tr_file_index_t fileCount;
     uint32_t pieceSize;
@@ -1610,11 +1558,7 @@ struct tr_info
     bool isFolder;
 };
 
-static inline bool tr_torrentHasMetadata(tr_torrent const* tor)
-{
-    tr_info const* const inf = tr_torrentInfo(tor);
-    return (inf != nullptr) && (inf->fileCount > 0);
-}
+bool tr_torrentHasMetadata(tr_torrent const* tor);
 
 /**
  * What the torrent is doing right now.
@@ -1744,13 +1688,13 @@ struct tr_stat
     int webseedsSendingToUs;
 
     /** Byte count of all the piece data we'll have downloaded when we're done,
-        whether or not we have it yet. This may be less than tr_info.totalSize
+        whether or not we have it yet. This may be less than tr_torrentTotalSize()
         if only some of the torrent's files are wanted.
-        [0...tr_info.totalSize] */
+        [0...tr_torrentTotalSize()] */
     uint64_t sizeWhenDone;
 
     /** Byte count of how much data is left to be downloaded until we've got
-        all the pieces that we want. [0...tr_info.sizeWhenDone] */
+        all the pieces that we want. [0...tr_stat.sizeWhenDone] */
     uint64_t leftUntilDone;
 
     /** Byte count of all the piece data we want and don't have yet,
@@ -1817,13 +1761,13 @@ struct tr_stat
     /** Cumulative seconds the torrent's ever spent seeding */
     int secondsSeeding;
 
-    /** A torrent is considered finished if it has met its seed ratio.
-        As a result, only paused torrents can be finished. */
-    bool finished;
-
     /** This torrent's queue position.
         All torrents have a queue position, even if it's not queued. */
     int queuePosition;
+
+    /** A torrent is considered finished if it has met its seed ratio.
+        As a result, only paused torrents can be finished. */
+    bool finished;
 
     /** True if the torrent is running, but has been idle for long enough
         to be considered stalled.  @see tr_sessionGetQueueStalledMinutes() */

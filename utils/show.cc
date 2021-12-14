@@ -121,14 +121,14 @@ void showInfo(tr_torrent_metainfo const& metainfo)
     printf("  Created by: %s\n", std::empty(metainfo.creator()) ? "Unknown" : metainfo.creator().c_str());
     printf("  Created on: %s\n", toString(metainfo.dateCreated()).c_str());
 
-    if (!std::empty(metainfo.source()))
-    {
-        printf("  Comment: %s\n", metainfo.source().c_str());
-    }
-
     if (!std::empty(metainfo.comment()))
     {
         printf("  Comment: %s\n", metainfo.comment().c_str());
+    }
+
+    if (!std::empty(metainfo.source()))
+    {
+        printf("  Source: %s\n", metainfo.source().c_str());
     }
 
     printf("  Piece Count: %" PRIu64 "\n", metainfo.pieceCount());
@@ -141,17 +141,18 @@ void showInfo(tr_torrent_metainfo const& metainfo)
     **/
 
     printf("\nTRACKERS\n");
-
-    int tier_number = 1;
-    for (auto const& tier : metainfo.tiers())
+    auto current_tier = std::optional<tr_tracker_tier_t>{};
+    auto print_tier = size_t{ 1 };
+    for (auto const& tracker : metainfo.announce_list)
     {
-        printf("\n  Tier #%d\n", tier_number);
-        ++tier_number;
-
-        for (auto const& tracker : tier)
+        if (!current_tier || current_tier != tracker.tier)
         {
-            printf("  %" TR_PRIsv "\n", TR_PRIsv_ARG(tracker.announce_url_str));
+            current_tier = tracker.tier;
+            printf("\n  Tier #%zu\n", print_tier);
+            ++print_tier;
         }
+
+        printf("  %" TR_PRIsv "\n", TR_PRIsv_ARG(tracker.announce.full));
     }
 
     /**
@@ -218,10 +219,9 @@ CURL* tr_curl_easy_init(struct evbuffer* writebuf)
 
 void doScrape(tr_torrent_metainfo const& metainfo)
 {
-    for (auto& tier : metainfo.tiers())
+    for (auto const& tracker : metainfo.announce_list)
     {
-        auto const& tracker = *std::begin(tier);
-        if (tracker.scrape_url == TR_KEY_NONE)
+        if (tracker.scrape_interned == TR_KEY_NONE)
         {
             continue;
         }
@@ -229,16 +229,18 @@ void doScrape(tr_torrent_metainfo const& metainfo)
         // build the full scrape URL
         auto escaped = std::array<char, TR_SHA1_DIGEST_LEN * 3 + 1>{};
         tr_http_escape_sha1(std::data(escaped), metainfo.infoHash());
+        auto const scrape = tracker.scrape.full;
         auto const url = tr_strvJoin(
-            tracker.scrape_url_str,
-            (tr_strvContains(tracker.scrape_url_str, '?') ? "&"sv : "?"sv),
+            scrape,
+            (tr_strvContains(scrape, '?') ? "&"sv : "?"sv),
             "info_hash="sv,
             std::data(escaped));
+
         printf("%" TR_PRIsv " ... ", TR_PRIsv_ARG(url));
         fflush(stdout);
 
         auto* const buf = evbuffer_new();
-        auto* curl = tr_curl_easy_init(buf);
+        auto* const curl = tr_curl_easy_init(buf);
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl, CURLOPT_TIMEOUT, TimeoutSecs);
 

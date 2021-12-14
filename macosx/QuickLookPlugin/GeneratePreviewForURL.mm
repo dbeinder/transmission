@@ -155,25 +155,22 @@ OSStatus GeneratePreviewForURL(void* thisInterface, QLPreviewRequestRef preview,
         [lists addObject:listSection];
     }
 
-    auto const n_trackers = metainfo.trackerCount();
-    if (n_trackers > 0)
+    if (!std::empty(*metainfo.announce_list))
     {
         NSMutableString* listSection = [NSMutableString string];
         [listSection appendString:@"<table>"];
 
-        NSString* headerTitleString = n_trackers == 1 ?
+        auto const n = std::size(*inf.announce_list);
+        NSString* headerTitleString = n == 1 ?
             NSLocalizedStringFromTableInBundle(@"1 Tracker", nil, bundle, "quicklook tracker header") :
             [NSString stringWithFormat:NSLocalizedStringFromTableInBundle(@"%@ Trackers", nil, bundle, "quicklook tracker header"),
-                                       [NSString formattedUInteger:n_trackers]];
+                                       [NSString formattedUInteger:n]];
         [listSection appendFormat:@"<tr><th>%@</th></tr>", headerTitleString];
 
 #warning handle tiers?
-        for (auto const& tier : metainfo.tiers())
+        for (auto const tracker : *inf.announce_list)
         {
-            for (auto const& tracker : tier)
-            {
-                [listSection appendFormat:@"<tr><td>%s<td></tr>", std::string(tracker.announce_url_str).c_str()];
-            }
+            [listSection appendFormat:@"<tr><td>%s<td></tr>", tr_quark_get_string(tracker.announce_interned)];
         }
 
         [listSection appendString:@"</table>"];

@@ -16,7 +16,7 @@
 #include "quark.h"
 
 struct tr_announcer;
-struct tr_torrent_tiers;
+struct tr_announcer_tiers;
 
 /**
  * ***  Tracker Publish / Subscribe
@@ -66,7 +66,7 @@ void tr_announcerClose(tr_session*);
 ***  For torrent customers
 **/
 
-struct tr_torrent_tiers* tr_announcerAddTorrent(tr_torrent* torrent, tr_tracker_callback cb, void* cbdata);
+struct tr_announcer_tiers* tr_announcerAddTorrent(tr_torrent* torrent, tr_tracker_callback cb, void* cbdata);
 
 void tr_announcerResetTorrent(struct tr_announcer*, tr_torrent*);
 
@@ -93,9 +93,9 @@ void tr_announcerAddBytes(tr_torrent*, int up_down_or_corrupt, uint32_t byteCoun
 
 time_t tr_announcerNextManualAnnounce(tr_torrent const*);
 
-tr_tracker_stat* tr_announcerStats(tr_torrent const* torrent, int* setmeTrackerCount);
+tr_tracker_view tr_announcerTracker(tr_torrent const* torrent, size_t i);
 
-void tr_announcerStatsFree(tr_tracker_stat* trackers, int trackerCount);
+size_t tr_announcerTrackerCount(tr_torrent const* tor);
 
 /***
 ****
