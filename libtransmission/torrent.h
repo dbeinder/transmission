@@ -125,6 +125,72 @@ tr_torrent_activity tr_torrentGetActivity(tr_torrent const* tor);
 
 struct tr_incomplete_metadata;
 
+/***********************************************************************
+* tr_info
+**********************************************************************/
+
+struct tr_file_priv
+{
+    uint64_t offset; // file begins at the torrent's nth byte
+    time_t mtime;
+    bool is_renamed; // true if we're using a different path from the one in the metainfo; ie, if the user has renamed it */
+};
+
+/** @brief a part of tr_info that represents a single file of the torrent's content */
+struct tr_file
+{
+    // public
+    char* name; /* Path to the file */
+    uint64_t length; /* Length of the file, in bytes */
+
+    // libtransmission implementation; do not use
+    tr_file_priv priv;
+};
+
+/** @brief information about a torrent that comes from its metainfo file */
+struct tr_info
+{
+    /* total size of the torrent, in bytes */
+    uint64_t totalSize;
+
+    /* The torrent's name. */
+    char* name;
+
+    /* Path to torrent Transmission's internal copy of the .torrent file. */
+    char* torrent;
+
+    char** webseeds;
+
+    char* comment;
+    char* creator;
+
+    /* torrent's source. empty if not set. */
+    char* source;
+
+    // Private.
+    // Use tr_torrentFile() and tr_torrentFileCount() instead.
+    tr_file* files;
+
+    // TODO(ckerr) aggregate this directly, rather than  using a shared_ptr, when tr_info is private
+    std::shared_ptr<tr_announce_list> announce_list;
+
+    /* Torrent info */
+    time_t dateCreated;
+
+    unsigned int webseedCount;
+    tr_file_index_t fileCount;
+    uint32_t pieceSize;
+    tr_piece_index_t pieceCount;
+
+    /* General info */
+    uint8_t hash[SHA_DIGEST_LENGTH];
+    char hashString[2 * SHA_DIGEST_LENGTH + 1];
+
+    /* Flags */
+    bool isPrivate;
+    bool isFolder;
+};
+
 /** @brief Torrent object */
 struct tr_torrent
     : public tr_block_info
@@ -413,6 +479,8 @@ public:
     }
 
     tr_info info = {};
+
+    tr_torrent_metainfo metainfo = {};
 
     tr_bitfield checked_pieces_ = tr_bitfield{ 0 };
 

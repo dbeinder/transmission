@@ -381,37 +381,7 @@ double tr_torrentGetMetadataPercent(tr_torrent const* tor)
     return m == nullptr || m->pieceCount == 0 ? 0.0 : (m->pieceCount - m->piecesNeededCount) / (double)m->pieceCount;
 }
 
-/* TODO: this should be renamed tr_metainfoGetMagnetLink() and moved to metainfo.c for consistency */
-char* tr_torrentInfoGetMagnetLink(tr_info const* inf)
-{
-    evbuffer* const s = evbuffer_new();
-
-    evbuffer_add_printf(s, "magnet:?xt=urn:btih:%s", inf->hashString);
-
-    char const* const name = inf->name;
-
-    if (!tr_str_is_empty(name))
-    {
-        evbuffer_add_printf(s, "%s", "&dn=");
-        tr_http_escape(s, name, true);
-    }
-
-    for (size_t i = 0, n = std::size(*inf->announce_list); i < n; ++i)
-    {
-        evbuffer_add_printf(s, "%s", "&tr=");
-        tr_http_escape(s, inf->announce_list->at(i).announce.full, true);
-    }
-
-    for (unsigned int i = 0; i < inf->webseedCount; i++)
-    {
-        evbuffer_add_printf(s, "%s", "&ws=");
-        tr_http_escape(s, inf->webseeds[i], true);
-    }
-
-    return evbuffer_free_to_str(s, nullptr);
-}
-
 char* tr_torrentGetMagnetLink(tr_torrent const* tor)
 {
-    return tr_torrentInfoGetMagnetLink(tr_torrentInfo(tor));
+    return tr_strvDup(tor->metainfo.magnet());
 }

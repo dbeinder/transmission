@@ -17,6 +17,7 @@
 #include "transmission.h"
 
 #include "bitfield.h"
+#include "torrent-metainfo.h"
 
 struct tr_block_info;
 
@@ -32,7 +33,7 @@ public:
     using file_span_t = index_span_t<tr_file_index_t>;
     using piece_span_t = index_span_t<tr_piece_index_t>;
 
-    explicit tr_file_piece_map(tr_info const& info)
+    explicit tr_file_piece_map(tr_torrent_metainfo const& info)
     {
         reset(info);
     }
@@ -41,7 +42,7 @@ public:
         reset(block_info, file_sizes, n_files);
     }
     void reset(tr_block_info const& block_info, uint64_t const* file_sizes, size_t n_files);
-    void reset(tr_info const& info);
+    void reset(tr_torrent_metainfo const& info);
 
     [[nodiscard]] piece_span_t pieceSpan(tr_file_index_t file) const;
     [[nodiscard]] file_span_t fileSpan(tr_piece_index_t piece) const;

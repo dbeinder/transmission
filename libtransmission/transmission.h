@@ -49,7 +49,6 @@ struct tr_block_span_t
 struct tr_ctor;
 struct tr_error;
 struct tr_file;
-struct tr_info;
 struct tr_session;
 struct tr_torrent;
 struct tr_torrent_metainfo;
@@ -1167,8 +1166,6 @@ char const* tr_torrentGetDownloadDir(tr_torrent const* torrent);
  */
 char const* tr_torrentGetCurrentDir(tr_torrent const* tor);
 
-char* tr_torrentInfoGetMagnetLink(tr_info const* inf);
-
 /**
  * Returns a newly-allocated string with a magnet link of the torrent.
  * Use tr_free() to free the string when done.
@@ -1492,72 +1489,6 @@ using tr_verify_done_func = void (*)(tr_torrent* torrent, bool aborted, void* us
  */
 void tr_torrentVerify(tr_torrent* torrent, tr_verify_done_func callback_func_or_nullptr, void* callback_data_or_nullptr);
 
-/***********************************************************************
- * tr_info
- **********************************************************************/
-
-struct tr_file_priv
-{
-    uint64_t offset; // file begins at the torrent's nth byte
-    time_t mtime;
-    bool is_renamed; // true if we're using a different path from the one in the metainfo; ie, if the user has renamed it */
-};
-
-/** @brief a part of tr_info that represents a single file of the torrent's content */
-struct tr_file
-{
-    // public
-    char* name; /* Path to the file */
-    uint64_t length; /* Length of the file, in bytes */
-
-    // libtransmission implementation; do not use
-    tr_file_priv priv;
-};
-
-/** @brief information about a torrent that comes from its metainfo file */
-struct tr_info
-{
-    /* total size of the torrent, in bytes */
-    uint64_t totalSize;
-
-    /* The torrent's name. */
-    char* name;
-
-    /* Path to torrent Transmission's internal copy of the .torrent file. */
-    char* torrent;
-
-    char** webseeds;
-
-    char* comment;
-    char* creator;
-
-    /* torrent's source. empty if not set. */
-    char* source;
-
-    // Private.
-    // Use tr_torrentFile() and tr_torrentFileCount() instead.
-    tr_file* files;
-
-    // TODO(ckerr) aggregate this directly, rather than  using a shared_ptr, when tr_info is private
-    std::shared_ptr<tr_announce_list> announce_list;
-
-    /* Torrent info */
-    time_t dateCreated;
-
-    unsigned int webseedCount;
-    tr_file_index_t fileCount;
-    uint32_t pieceSize;
-    tr_piece_index_t pieceCount;
-
-    /* General info */
-    uint8_t hash[SHA_DIGEST_LENGTH];
-    char hashString[2 * SHA_DIGEST_LENGTH + 1];
-
-    /* Flags */
-    bool isPrivate;
-    bool isFolder;
-};
-
 bool tr_torrentHasMetadata(tr_torrent const* tor);
 
 /**
@@ -1746,9 +1677,9 @@ struct tr_stat
     time_t activityDate;
 
     /** The last time during this session that a rarely-changing field
-        changed -- e.g. any tr_info field (trackers, filenames, name)
-        or download directory. RPC clients can monitor this to know when
-        to reload fields that rarely change. */
+        changed -- e.g. torrent name, filenames, or download directory.
+        RPC clients can monitor this to know when to reload fields that
+        rarely change. */
     time_t editDate;
 
     /** Number of seconds since the last activity (or since started).
