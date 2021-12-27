@@ -228,6 +228,7 @@ constexpr bool tr_str_is_empty(char const* value)
     return value == nullptr || *value == '\0';
 }
 
+std::string evbuffer_free_to_str(struct evbuffer* buf);
 char* evbuffer_free_to_str(struct evbuffer* buf, size_t* result_len);
 
 /**

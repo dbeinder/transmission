@@ -19,7 +19,6 @@
 #include "file.h"
 #include "log.h"
 #include "magnet-metainfo.h"
-#include "metainfo.h"
 #include "resume.h"
 #include "torrent-magnet.h"
 #include "torrent.h"
@@ -111,95 +110,53 @@ bool tr_torrentSetMetadataSizeHint(tr_torrent* tor, int64_t size)
     return true;
 }
 
-static size_t findInfoDictOffset(tr_torrent const* tor)
-{
-    size_t offset = 0;
-
-    /* load the file, and find the info dict's offset inside the file */
-    auto fileLen = size_t{};
-    uint8_t* const fileContents = tr_loadFile(tor->torrentFile(), &fileLen, nullptr);
-    if (fileContents != nullptr)
-    {
-        auto top = tr_variant{};
-        auto const contents_sv = std::string_view{ reinterpret_cast<char const*>(fileContents), fileLen };
-        if (tr_variantFromBuf(&top, TR_VARIANT_PARSE_BENC | TR_VARIANT_PARSE_INPLACE, contents_sv))
-        {
-            tr_variant* infoDict = nullptr;
-            if (tr_variantDictFindDict(&top, TR_KEY_info, &infoDict))
-            {
-                auto infoLen = size_t{};
-                char* infoContents = tr_variantToStr(infoDict, TR_VARIANT_FMT_BENC, &infoLen);
-                uint8_t const* i = (uint8_t const*)tr_memmem((char*)fileContents, fileLen, infoContents, infoLen);
-                offset = i != nullptr ? i - fileContents : 0;
-                tr_free(infoContents);
-            }
-
-            tr_variantFree(&top);
-        }
-
-        tr_free(fileContents);
-    }
-
-    return offset;
-}
-
-static void ensureInfoDictOffsetIsCached(tr_torrent* tor)
-{
-    TR_ASSERT(tor->hasMetadata());
-
-    if (!tor->infoDictOffsetIsCached)
-    {
-        tor->infoDictOffset = findInfoDictOffset(tor);
-        tor->infoDictOffsetIsCached = true;
-    }
-}
-
 void* tr_torrentGetMetadataPiece(tr_torrent* tor, int piece, size_t* len)
 {
     TR_ASSERT(tr_isTorrent(tor));
     TR_ASSERT(piece >= 0);
     TR_ASSERT(len != nullptr);
 
-    char* ret = nullptr;
-
-    if (tor->hasMetadata())
+    if (!tor->hasMetadata())
     {
-        ensureInfoDictOffsetIsCached(tor);
+        return {};
+    }
 
-        auto const info_dict_length = tor->infoDictLength();
-        TR_ASSERT(info_dict_length > 0);
+    auto const fd = tr_sys_file_open(tor->torrentFile().c_str(), TR_SYS_FILE_READ, 0, nullptr);
+    if (fd == TR_BAD_SYS_FILE)
+    {
+        return {};
+    }
 
-        auto const fd = tr_sys_file_open(tor->torrentFile(), TR_SYS_FILE_READ, 0, nullptr);
-        if (fd != TR_BAD_SYS_FILE)
+    auto const info_dict_offset = tor->infoDictOffset();
+    auto const info_dict_size = tor->infoDictSize();
+    TR_ASSERT(info_dict_size > 0);
+
+    size_t const o = piece * METADATA_PIECE_SIZE;
+
+    char* ret = nullptr;
+    if (tr_sys_file_seek(fd, info_dict_offset + o, TR_SEEK_SET, nullptr, nullptr))
+    {
+        size_t const l = o + METADATA_PIECE_SIZE <= info_dict_size ? METADATA_PIECE_SIZE : info_dict_size - o;
+
+        if (0 < l && l <= METADATA_PIECE_SIZE)
         {
-            size_t const o = piece * METADATA_PIECE_SIZE;
+            char* buf = tr_new(char, l);
+            auto n = uint64_t{};
 
-            if (tr_sys_file_seek(fd, tor->infoDictOffset + o, TR_SEEK_SET, nullptr, nullptr))
+            if (tr_sys_file_read(fd, buf, l, &n, nullptr) && n == l)
             {
-                size_t const l = o + METADATA_PIECE_SIZE <= info_dict_length ? METADATA_PIECE_SIZE : info_dict_length - o;
-
-                if (0 < l && l <= METADATA_PIECE_SIZE)
-                {
-                    char* buf = tr_new(char, l);
-                    auto n = uint64_t{};
-
-                    if (tr_sys_file_read(fd, buf, l, &n, nullptr) && n == l)
-                    {
-                        *len = l;
-                        ret = buf;
-                        buf = nullptr;
-                    }
-
-                    tr_free(buf);
-                }
+                *len = l;
+                ret = buf;
+                buf = nullptr;
             }
 
-            tr_sys_file_close(fd, nullptr);
+            tr_free(buf);
         }
     }
 
-    TR_ASSERT(ret == nullptr || *len > 0);
+    tr_sys_file_close(fd, nullptr);
 
+    TR_ASSERT(ret == nullptr || *len > 0);
     return ret;
 }
 

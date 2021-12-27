@@ -45,7 +45,6 @@
 #include "inout.h" /* tr_ioTestPiece() */
 #include "log.h"
 #include "magnet-metainfo.h"
-#include "metainfo.h"
 #include "peer-common.h" /* MAX_BLOCK_SIZE */
 #include "peer-mgr.h"
 #include "platform.h" /* TR_PATH_DELIMITER_STR */
@@ -77,7 +76,7 @@ using namespace std::literals;
 
 char const* tr_torrentName(tr_torrent const* tor)
 {
-    return tor != nullptr ? tor->info.name : "";
+    return tor->metainfo.name().c_str();
 }
 
 uint64_t tr_torrentTotalSize(tr_torrent const* tor)
@@ -774,20 +773,14 @@ tr_torrent* tr_torrentNew(tr_ctor const* ctor, tr_torrent** setme_duplicate_of)
     TR_ASSERT(tr_isSession(session));
 
     // is the metainfo valid?
-    auto top = tr_variant{};
-    if (!tr_variantFromBuf(&top, TR_VARIANT_PARSE_BENC, tr_ctorGetContents(ctor), nullptr, nullptr))
-    {
-        return nullptr;
-    }
-    auto parsed = tr_metainfoParse(session, &top, nullptr);
-    tr_variantFree(&top);
-    if (!parsed)
+    auto* const metainfo = tr_ctorGetMetainfo(ctor);
+    if (!metainfo)
     {
         return nullptr;
     }
 
     // is it a duplicate?
-    if (auto* const duplicate_of = session->getTorrent(parsed->info.hash); duplicate_of != nullptr)
+    if (auto* const duplicate_of = session->getTorrent(metainfo.infoHash()); duplicate_of != nullptr)
     {
         if (setme_duplicate_of != nullptr)
         {
@@ -798,8 +791,7 @@ tr_torrent* tr_torrentNew(tr_ctor const* ctor, tr_torrent** setme_duplicate_of)
     }
 
     // add it
-    auto* const tor = new tr_torrent{ parsed->info };
-    tor->swapMetainfo(*parsed);
+    auto* const tor = new tr_torrent{ *metainfo };
     torrentInit(tor, ctor);
     return tor;
 }
@@ -1984,7 +1976,7 @@ bool tr_torrentReqIsValid(tr_torrent const* tor, tr_piece_index_t index, uint32_
 }
 
 // TODO(ckerr) migrate to fpm?
-tr_block_span_t tr_torGetFileBlockSpan(tr_torrent const* tor, tr_file_index_t const i)
+tr_block_span_t tr_torGetFileBlockSpan(tr_torrent const* tor, tr_file_index_t i)
 {
     auto const [begin_byte, end_byte] = tor->fpm_.byteSpan(i);
 
@@ -3087,13 +3079,6 @@ void tr_torrentRenamePath(
     tor->renamePath(oldpath, newname, callback, callback_user_data);
 }
 
-void tr_torrent::swapMetainfo(tr_metainfo_parsed& parsed)
-{
-    std::swap(this->info, parsed.info);
-    std::swap(this->piece_checksums_, parsed.pieces);
-    std::swap(this->info_dict_length, parsed.info_dict_length);
-}
-
 void tr_torrentSetFilePriorities(
     tr_torrent* tor,
     tr_file_index_t const* files,
@@ -3131,11 +3116,5 @@ void tr_torrent::setBlocks(tr_bitfield blocks)
 
 void tr_torrent::setName(std::string_view name)
 {
-    if (name == this->info.name)
-    {
-        return;
-    }
-
-    tr_free(this->info.name);
-    this->info.name = tr_strvDup(name);
+    this->metainfo.setName(name);
 }

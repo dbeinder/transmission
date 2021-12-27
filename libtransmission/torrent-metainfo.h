@@ -20,7 +20,6 @@
 #include "quark.h"
 
 struct tr_error;
-struct tr_info;
 
 struct tr_torrent_metainfo : public tr_magnet_metainfo
 {
@@ -77,7 +76,7 @@ public:
         return is_private_;
     }
 
-    [[nodiscard]] auto const& parsedTorrentFile() const
+    [[nodiscard]] auto const& torrentFile() const
     {
         return torrent_file_;
     }

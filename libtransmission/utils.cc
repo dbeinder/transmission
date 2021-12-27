@@ -467,6 +467,16 @@ tr_disk_space tr_dirSpace(std::string_view dir)
 *****
 ****/
 
+std::string evbuffer_free_to_str(struct evbuffer* buf)
+{
+    size_t const n = evbuffer_get_length(buf);
+    auto ret = std::string{};
+    ret.resize(n);
+    evbuffer_copyout(buf, std::data(ret), n);
+    evbuffer_free(buf);
+    return ret;
+}
+
 char* evbuffer_free_to_str(struct evbuffer* buf, size_t* result_len)
 {
     size_t const n = evbuffer_get_length(buf);

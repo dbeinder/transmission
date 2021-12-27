@@ -54,10 +54,11 @@ static int readOrWriteBytes(
     bool const doWrite = ioMode >= TR_IO_WRITE;
 
     auto const& file = tor->file(fileIndex);
-    TR_ASSERT(file.length == 0 || fileOffset < file.length);
-    TR_ASSERT(fileOffset + buflen <= file.length);
+    auto const length = file.length();
+    TR_ASSERT(length == 0 || fileOffset < length);
+    TR_ASSERT(fileOffset + buflen <= length);
 
-    if (file.length == 0)
+    if (length == 0)
     {
         return 0;
     }
@@ -84,7 +85,7 @@ static int readOrWriteBytes(
             /* figure out where the file should go, so we can create it */
             base = tr_torrentGetCurrentDir(tor);
             subpath = tr_sessionIsIncompleteFileNamingEnabled(tor->session) ? tr_torrentBuildPartial(tor, fileIndex) :
-                                                                              tr_strdup(file.name);
+                                                                              tr_strvDup(file.path());
         }
 
         if (err == 0)
@@ -95,7 +96,7 @@ static int readOrWriteBytes(
                 TR_PREALLOCATE_NONE :
                 tor->session->preallocationMode;
 
-            fd = tr_fdFileCheckout(session, tor->uniqueId, fileIndex, filename.c_str(), doWrite, prealloc, file.length);
+            fd = tr_fdFileCheckout(session, tor->uniqueId, fileIndex, filename.c_str(), doWrite, prealloc, length);
             if (fd == TR_BAD_SYS_FILE)
             {
                 err = errno;
@@ -124,7 +125,7 @@ static int readOrWriteBytes(
             if (!tr_sys_file_read_at(fd, buf, buflen, fileOffset, nullptr, &error))
             {
                 err = error->code;
-                tr_logAddTorErr(tor, "read failed for \"%s\": %s", file.name, error->message);
+                tr_logAddTorErr(tor, "read failed for \"%s\": %s", file.path().c_str(), error->message);
                 tr_error_free(error);
             }
         }
@@ -133,7 +134,7 @@ static int readOrWriteBytes(
             if (!tr_sys_file_write_at(fd, buf, buflen, fileOffset, nullptr, &error))
             {
                 err = error->code;
-                tr_logAddTorErr(tor, "write failed for \"%s\": %s", file.name, error->message);
+                tr_logAddTorErr(tor, "write failed for \"%s\": %s", file.path().c_str(), error->message);
                 tr_error_free(error);
             }
         }
@@ -171,7 +172,7 @@ static int readOrWritePiece(
     while (buflen != 0 && err == 0)
     {
         auto const& file = tor->file(fileIndex);
-        uint64_t const bytesThisPass = std::min(uint64_t{ buflen }, uint64_t{ file.length - fileOffset });
+        uint64_t const bytesThisPass = std::min(uint64_t{ buflen }, uint64_t{ file.length() - fileOffset });
 
         err = readOrWriteBytes(tor->session, tor, ioMode, fileIndex, fileOffset, buf, bytesThisPass);
         buf += bytesThisPass;
@@ -181,7 +182,7 @@ static int readOrWritePiece(
 
         if (err != 0 && ioMode == TR_IO_WRITE && tor->error != TR_STAT_LOCAL_ERROR)
         {
-            auto const path = tr_strvPath(tor->downloadDir().sv(), file.name);
+            auto const path = tr_strvPath(tor->downloadDir().sv(), file.path());
             tor->setLocalError(tr_strvJoin(tr_strerror(err), " ("sv, path, ")"sv));
         }
     }

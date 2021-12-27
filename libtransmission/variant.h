@@ -110,6 +110,8 @@ int tr_variantToFile(tr_variant const* variant, tr_variant_fmt fmt, std::string_
 
 char* tr_variantToStr(tr_variant const* variant, tr_variant_fmt fmt, size_t* len);
 
+std::string tr_variantToStr(tr_variant const* variant, tr_variant_fmt fmt);
+
 struct evbuffer* tr_variantToBuf(tr_variant const* variant, tr_variant_fmt fmt);
 
 enum tr_variant_parse_opts

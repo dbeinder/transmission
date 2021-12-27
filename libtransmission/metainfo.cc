@@ -22,10 +22,10 @@
 #include "error-types.h"
 #include "file.h"
 #include "log.h"
-#include "metainfo.h"
 #include "platform.h" /* tr_getTorrentDir() */
 #include "session.h"
 #include "torrent.h"
+#include "torrent-metainfo.h"
 #include "utils.h"
 #include "variant.h"
 #include "web-utils.h"

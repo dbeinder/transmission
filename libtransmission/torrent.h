@@ -27,11 +27,12 @@
 #include "bitfield.h"
 #include "block-info.h"
 #include "completion.h"
-#include "file.h"
 #include "file-piece-map.h"
+#include "file.h"
 #include "interned-string.h"
 #include "quark.h"
 #include "session.h"
+#include "torrent-metainfo.h"
 #include "tr-assert.h"
 #include "tr-macros.h"
 
@@ -86,7 +87,7 @@ void tr_torrentGetBlockLocation(
     uint32_t* offset,
     uint32_t* length);
 
-tr_block_span_t tr_torGetFileBlockSpan(tr_torrent const* tor, tr_file_index_t const file);
+tr_block_span_t tr_torGetFileBlockSpan(tr_torrent const* tor, tr_file_index_t file);
 
 void tr_torrentCheckSeedLimit(tr_torrent* tor);
 
@@ -110,13 +111,14 @@ struct tr_torrent
     , public tr_completion::torrent_view
 {
 public:
-    tr_torrent(tr_info const& inf)
-        : tr_block_info{ inf.totalSize, inf.pieceSize }
+    tr_torrent(tr_torrent_metainfo const& tm)
+        : tr_block_info{ tm.totalSize(), tm.pieceSize() }
+        , metainfo{ tm }
         , completion{ this, this }
     {
     }
 
-    virtual ~tr_torrent() override = default;
+    ~tr_torrent() override = default;
 
     void setLocation(
         std::string_view location,
@@ -139,9 +141,6 @@ public:
     // these functions should become private when possible,
     // but more refactoring is needed before that can happen
     // because much of tr_torrent's impl is in the non-member C bindings
-    //
-    // private:
-    void swapMetainfo(tr_metainfo_parsed& parsed);
 
     auto unique_lock() const
     {
@@ -314,21 +313,14 @@ public:
 
     [[nodiscard]] tr_file_index_t fileCount() const
     {
-        return info.fileCount;
-    }
-
-    [[nodiscard]] auto& file(tr_file_index_t i)
-    {
-        TR_ASSERT(i < this->fileCount());
-
-        return info.files[i];
+        return std::size(metainfo.files());
     }
 
     [[nodiscard]] auto const& file(tr_file_index_t i) const
     {
         TR_ASSERT(i < this->fileCount());
 
-        return info.files[i];
+        return metainfo.files().at(i);
     }
 
     struct tr_found_file_t : public tr_sys_path_info
@@ -352,38 +344,26 @@ public:
 
     [[nodiscard]] auto trackerCount() const
     {
-        return std::size(*info.announce_list);
+        return std::size(metainfo.announceList());
     }
 
     [[nodiscard]] auto const& tracker(size_t i) const
     {
-        return info.announce_list->at(i);
-    }
-
-    [[nodiscard]] auto tiers() const
-    {
-        return info.announce_list->tiers();
+        return metainfo.announceList().at(i);
     }
 
     /// METAINFO - WEBSEEDS
 
     [[nodiscard]] auto webseedCount() const
     {
-        return info.webseedCount;
+        return std::size(metainfo.webseeds());
     }
 
     [[nodiscard]] auto const& webseed(size_t i) const
     {
         TR_ASSERT(i < webseedCount());
 
-        return info.webseeds[i];
-    }
-
-    [[nodiscard]] auto& webseed(size_t i)
-    {
-        TR_ASSERT(i < webseedCount());
-
-        return info.webseeds[i];
+        return metainfo.webseeds().at(i);
     }
 
     /// METAINFO - OTHER
@@ -392,12 +372,12 @@ public:
 
     [[nodiscard]] auto const& infoHash() const
     {
-        return this->info.hash;
+        return this->metainfo.infoHash();
     }
 
     [[nodiscard]] auto isPrivate() const
     {
-        return this->info.isPrivate;
+        return this->metainfo.isPrivate();
     }
 
     [[nodiscard]] auto isPublic() const
@@ -407,12 +387,12 @@ public:
 
     [[nodiscard]] auto pieceCount() const
     {
-        return this->info.pieceCount;
+        return this->metainfo.pieceCount();
     }
 
     [[nodiscard]] auto pieceSize() const
     {
-        return this->info.pieceSize;
+        return this->metainfo.pieceSize();
     }
 
     [[nodiscard]] auto pieceSize(tr_piece_index_t i) const
@@ -422,27 +402,27 @@ public:
 
     [[nodiscard]] auto totalSize() const
     {
-        return this->info.totalSize;
+        return this->metainfo.totalSize();
     }
 
     [[nodiscard]] auto infoHashString() const
     {
-        return this->info.hashString;
+        return this->metainfo.infoHashString();
     }
 
     [[nodiscard]] auto const& announceList() const
     {
-        return *this->info.announce_list;
+        return this->metainfo.announceList();
     }
 
     [[nodiscard]] auto& announceList()
     {
-        return *this->info.announce_list;
+        return this->metainfo.announceList();
     }
 
     [[nodiscard]] auto const& torrentFile() const
     {
-        return this->info.torrent;
+        return this->metainfo.torrentFile();
     }
 
     [[nodiscard]] auto hasMetadata() const
@@ -450,9 +430,14 @@ public:
         return fileCount() > 0;
     }
 
-    [[nodiscard]] auto infoDictLength() const
+    [[nodiscard]] auto infoDictSize() const
     {
-        return this->info_dict_length;
+        return this->metainfo.infoDictSize();
+    }
+
+    [[nodiscard]] auto infoDictOffset() const
+    {
+        return this->metainfo.infoDictOffset();
     }
 
     /// METAINFO - CHECKSUMS
@@ -553,7 +538,7 @@ public:
         torrent's content than any other mime-type. */
     std::string_view primaryMimeType() const;
 
-    tr_info info = {};
+    tr_torrent_metainfo metainfo;
 
     tr_bitfield checked_pieces_ = tr_bitfield{ 0 };
 
@@ -613,12 +598,6 @@ public:
     /* Length, in bytes, of the "info" dict in the .torrent file. */
     uint64_t info_dict_length = 0;
 
-    /* Offset, in bytes, of the beginning of the "info" dict in the .torrent file.
-     *
-     * Used by the torrent-magnet code for serving metainfo to peers.
-     * This field is lazy-generated and might not be initialized yet. */
-    size_t infoDictOffset = 0;
-
     tr_completeness completeness = TR_LEECH;
 
     time_t dhtAnnounceAt = 0;
@@ -677,9 +656,6 @@ public:
     bool prefetchMagnetMetadata = false;
     bool magnetVerify = false;
 
-    // TODO(ckerr) use std::optional
-    bool infoDictOffsetIsCached = false;
-
     void setDirty()
     {
         this->isDirty = true;
@@ -708,7 +684,7 @@ public:
 
     static auto constexpr MagicNumber = int{ 95549 };
 
-    tr_file_piece_map fpm_ = tr_file_piece_map{ info };
+    tr_file_piece_map fpm_ = tr_file_piece_map{ metainfo };
     tr_file_priorities file_priorities_{ &fpm_ };
     tr_files_wanted files_wanted_{ &fpm_ };
 
@@ -772,6 +748,3 @@ char* tr_torrentBuildPartial(tr_torrent const*, tr_file_index_t fileNo);
 void tr_torrentGotNewInfoDict(tr_torrent* tor);
 
 tr_peer_id_t const& tr_torrentGetPeerId(tr_torrent* tor);
-
-/** @brief free a metainfo */
-void tr_metainfoFree(tr_info* inf);

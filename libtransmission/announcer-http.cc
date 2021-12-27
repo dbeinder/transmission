@@ -227,17 +227,12 @@ static void on_announce_done(
             }
             else
             {
-                auto len = size_t{};
-                char* str = tr_variantToStr(&benc, TR_VARIANT_FMT_JSON, &len);
                 fprintf(stderr, "%s", "Announce response:\n< ");
-
-                for (size_t i = 0; i < len; ++i)
+                for (auto const ch : tr_variantToStr(&benc, TR_VARIANT_FMT_JSON))
                 {
-                    fputc(str[i], stderr);
+                    fputc(ch, stderr);
                 }
-
                 fputc('\n', stderr);
-                tr_free(str);
             }
         }
 

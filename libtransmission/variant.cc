@@ -1202,8 +1202,12 @@ struct evbuffer* tr_variantToBuf(tr_variant const* v, tr_variant_fmt fmt)
 
 char* tr_variantToStr(tr_variant const* v, tr_variant_fmt fmt, size_t* len)
 {
-    struct evbuffer* buf = tr_variantToBuf(v, fmt);
-    return evbuffer_free_to_str(buf, len);
+    return evbuffer_free_to_str(tr_variantToBuf(v, fmt), len);
+}
+
+std::string tr_variantToStr(tr_variant const* v, tr_variant_fmt fmt)
+{
+    return evbuffer_free_to_str(tr_variantToBuf(v, fmt));
 }
 
 int tr_variantToFile(tr_variant const* v, tr_variant_fmt fmt, std::string_view filename)
